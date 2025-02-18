@@ -13,7 +13,7 @@ bot = telebot.TeleBot(TOKEN)
 conn = sqlite3.connect('clients.db', check_same_thread=False)
 cursor = conn.cursor()
 
-# Создание таблицы пользователей
+# Создание таблицы пользователей с полем survey_completed
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
@@ -24,14 +24,26 @@ CREATE TABLE IF NOT EXISTS users (
     suggestions TEXT,
     gender TEXT,
     age_group TEXT,
-    visit_frequency TEXT
+    visit_frequency TEXT,
+    survey_completed INTEGER DEFAULT 0
+)
+""")
+
+# Создание таблицы для хранения второго получателя
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
 )
 """)
 conn.commit()
 
-# Храним ID второго получателя
-recipient_id = None
+# Получаем текущего второго получателя (если есть)
+cursor.execute("SELECT value FROM settings WHERE key = 'recipient_id'")
+recipient_row = cursor.fetchone()
+recipient_id = int(recipient_row[0]) if recipient_row else None
 
+# Команда для установки второго получателя
 @bot.message_handler(commands=['set_recipient'])
 def set_recipient(message):
     """Команда для админа: Установить второго получателя анкет и сообщений"""
@@ -44,10 +56,12 @@ def set_recipient(message):
     bot.register_next_step_handler(message, save_recipient)
 
 def save_recipient(message):
-    """Сохраняем ID второго получателя"""
+    """Сохраняем ID второго получателя в базу"""
     global recipient_id
     try:
         recipient_id = int(message.text)
+        cursor.execute("INSERT INTO settings (key, value) VALUES ('recipient_id', ?) ON CONFLICT(key) DO UPDATE SET value = ?", (recipient_id, recipient_id))
+        conn.commit()
         bot.reply_to(message, f"✅ Второй получатель установлен: {recipient_id}")
     except ValueError:
         bot.reply_to(message, "⚠ Ошибка! Введите корректный числовой ID.")
@@ -172,12 +186,13 @@ def send_survey_to_admin(user_id):
 
 @bot.message_handler(func=lambda message: True)
 def forward_messages(message):
-    """Пересылка всех сообщений админу и второму получателю"""
-    if str(message.from_user.id) != ADMIN_ID:
+    """Пересылка сообщений только от тех, кто прошел анкету"""
+    cursor.execute("SELECT survey_completed FROM users WHERE user_id = ?", (message.from_user.id,))
+    user = cursor.fetchone()
+    if user and user[0] == 1:
         bot.forward_message(ADMIN_ID, message.chat.id, message.message_id)
         if recipient_id:
             bot.forward_message(recipient_id, message.chat.id, message.message_id)
-
 # Команда для очистки базы
 @bot.message_handler(commands=['clear_database'])
 def clear_database(message):

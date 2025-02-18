@@ -95,37 +95,48 @@ def save_suggestions(message):
     conn.commit()
     ask_additional_info(message)
 
-# Дополнительные вопросы (пол, возраст, частота посещений)
+# Вопрос о поле, возрасте и частоте посещений (одно сообщение)
 def ask_additional_info(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add("Мужской", "Женский")
-    bot.send_message(message.chat.id, "Спасибо огромное за помощь😊\nЯ учту ваши пожелания и постараюсь приложить усилия, чтобы это исправить.\nЕсли не сложно, подскажите ваш пол:", reply_markup=markup)
-    bot.register_next_step_handler(message, save_gender)
+    user_progress[message.from_user.id] = {"answers": []}  # Создаём запись в словаре
 
-def save_gender(message):
-    cursor.execute("UPDATE users SET gender = ? WHERE user_id = ?", (message.text, message.from_user.id))
-    conn.commit()
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add("До 22", "22-30", "Более 30")
-    bot.send_message(message.chat.id, "Укажите ваш возраст:", reply_markup=markup)
-    bot.register_next_step_handler(message, save_age_group)
-
-def save_age_group(message):
-    cursor.execute("UPDATE users SET age_group = ? WHERE user_id = ?", (message.text, message.from_user.id))
-    conn.commit()
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add("Был до 3х раз", "3-8", "Более 8 раз")
-    bot.send_message(message.chat.id, "Как часто вы нас посещали?", reply_markup=markup)
-    bot.register_next_step_handler(message, save_visit_frequency)
-
-def save_visit_frequency(message):
-    cursor.execute("UPDATE users SET visit_frequency = ? WHERE user_id = ?", (message.text, message.from_user.id))
-    conn.commit()
+    bot.send_message(message.chat.id, 
+                     "Спасибо огромное за помощь😊\nЯ учту ваши пожелания и постараюсь приложить усилия, чтобы это исправить.\n\n"
+                     "Ответьте на три вопроса одним за другим:\n"
+                     "1️⃣ Ваш пол (Мужской / Женский)\n"
+                     "2️⃣ Ваш возраст (До 22 / 22-30 / Более 30)\n"
+                     "3️⃣ Как часто посещали наш магазин? (Был до 3х раз / 3-8 / Более 8 раз)")
     
-    # Отправляем анкету админу
-    send_survey_to_admin(message.from_user.id)
+    bot.register_next_step_handler(message, collect_three_answers)
 
-    bot.send_message(message.chat.id, "Благодарю!\n📞 8-918-5567-53-33\nВот мой номер телефона, по нему вы всегда можете позвонить или написать в WhatsApp/Telegram.\n\nЕсли вам нужна информация о наличии, ценах или вкусах, напишите в наш чат: https://t.me/+BR14rdoGA91mZjdi")
+# Получаем три последовательных ответа
+def collect_three_answers(message):
+    user_id = message.from_user.id
+    
+    if user_id not in user_progress:
+        user_progress[user_id] = {"answers": []}
+    
+    user_progress[user_id]["answers"].append(message.text)  # Добавляем ответ в список
+    
+    if len(user_progress[user_id]["answers"]) < 3:
+        bot.register_next_step_handler(message, collect_three_answers)  # Ждём следующий ответ
+    else:
+        save_additional_info(message)
+
+# Сохранение ответов в БД
+def save_additional_info(message):
+    user_id = message.from_user.id
+    answers = user_progress.get(user_id, {}).get("answers", [])
+    
+    if len(answers) == 3:
+        gender, age_group, visit_frequency = answers
+        cursor.execute("UPDATE users SET gender = ?, age_group = ?, visit_frequency = ? WHERE user_id = ?",
+                       (gender, age_group, visit_frequency, user_id))
+        conn.commit()
+        send_survey_to_admin(user_id)
+        bot.send_message(message.chat.id, "Благодарю!\n📞 8-918-5567-53-33\nВот мой номер телефона, по нему вы всегда можете позвонить или написать в WhatsApp/Telegram.\n\n"
+                                          "Если вам нужна информация о наличии, ценах или вкусах, напишите в наш чат: https://t.me/+BR14rdoGA91mZjdi")
+    
+    user_progress.pop(user_id, None)  # Удаляем данные после обработки
 
 # Отправка анкеты админу
 def send_survey_to_admin(user_id):
@@ -144,7 +155,7 @@ def send_survey_to_admin(user_id):
         survey_text += f"Частота посещений: {visit_frequency}\n"
         
         bot.send_message(ADMIN_ID, survey_text)
-
+        
 # Команда для очистки базы
 @bot.message_handler(commands=['clear_database'])
 def clear_database(message):

@@ -98,36 +98,59 @@ def save_suggestions(message):
     conn.commit()
     ask_additional_info(message)
 
-# Вопрос о поле, возрасте и частоте посещений (одно сообщение)
+# Вопрос о поле, возрасте и частоте посещений (всё в одном сообщении с кнопками)
 def ask_additional_info(message):
     user_progress[message.from_user.id] = {"answers": []}  # Создаём запись в словаре
 
-    bot.send_message(message.chat.id, 
-                     "Спасибо огромное за помощь😊\nЯ учту ваши пожелания и постараюсь приложить усилия, чтобы это исправить.\n\n"
-                     "Ответьте на три вопроса одним за другим:\n"
-                     "1️⃣ Ваш пол (Мужской / Женский)\n"
-                     "2️⃣ Ваш возраст (До 22 / 22-30 / Более 30)\n"
-                     "3️⃣ Как часто посещали наш магазин? (Был до 3х раз / 3-8 / Более 8 раз)")
-    
-    bot.register_next_step_handler(message, collect_three_answers)
+    markup = types.InlineKeyboardMarkup()
 
-# Получаем три последовательных ответа
-def collect_three_answers(message):
-    user_id = message.from_user.id
+    gender_buttons = [
+        types.InlineKeyboardButton("Мужской", callback_data="gender_Мужской"),
+        types.InlineKeyboardButton("Женский", callback_data="gender_Женский")
+    ]
+    
+    age_buttons = [
+        types.InlineKeyboardButton("До 22", callback_data="age_До 22"),
+        types.InlineKeyboardButton("22-30", callback_data="age_22-30"),
+        types.InlineKeyboardButton("Более 30", callback_data="age_Более 30")
+    ]
+    
+    visit_buttons = [
+        types.InlineKeyboardButton("До 3 раз", callback_data="visit_До 3 раз"),
+        types.InlineKeyboardButton("3-8 раз", callback_data="visit_3-8 раз"),
+        types.InlineKeyboardButton("Более 8 раз", callback_data="visit_Более 8 раз")
+    ]
+
+    markup.row(*gender_buttons)
+    markup.row(*age_buttons)
+    markup.row(*visit_buttons)
+
+    bot.send_message(
+        message.chat.id,
+        "Спасибо за вашу помощь! 🙏\nВыберите ваш **пол, возраст и частоту посещений** кнопками ниже:",
+        reply_markup=markup
+    )
+
+# Обработчик кнопок (callback_data)
+@bot.callback_query_handler(func=lambda call: call.data.startswith(('gender_', 'age_', 'visit_')))
+def handle_callback(call):
+    user_id = call.from_user.id
     
     if user_id not in user_progress:
         user_progress[user_id] = {"answers": []}
     
-    user_progress[user_id]["answers"].append(message.text)  # Добавляем ответ в список
+    # Извлекаем значение после "_"
+    _, answer = call.data.split("_")
     
-    if len(user_progress[user_id]["answers"]) < 3:
-        bot.register_next_step_handler(message, collect_three_answers)  # Ждём следующий ответ
+    user_progress[user_id]["answers"].append(answer)
+    
+    if len(user_progress[user_id]["answers"]) == 3:
+        save_additional_info(call.message, user_id)
     else:
-        save_additional_info(message)
+        bot.answer_callback_query(call.id, "Ответ сохранён!")
 
 # Сохранение ответов в БД
-def save_additional_info(message):
-    user_id = message.from_user.id
+def save_additional_info(message, user_id):
     answers = user_progress.get(user_id, {}).get("answers", [])
     
     if len(answers) == 3:
@@ -136,26 +159,26 @@ def save_additional_info(message):
                        (gender, age_group, visit_frequency, user_id))
         conn.commit()
         send_survey_to_admin(user_id)
-        bot.send_message(message.chat.id, "Благодарю!\n📞 8-918-5567-53-33\nВот мой номер телефона, по нему вы всегда можете позвонить или написать в WhatsApp/Telegram.\n\n"
-                                          "Если вам нужна информация о наличии, ценах или вкусах, напишите в наш чат: https://t.me/+BR14rdoGA91mZjdi")
+        bot.send_message(
+            message.chat.id,
+            "Благодарю!\n📞 8-918-5567-53-33\nВот мой номер телефона, по нему вы всегда можете позвонить или написать в WhatsApp/Telegram.\n\n"
+            "Если вам нужна информация о наличии, ценах или вкусах, напишите в наш чат: https://t.me/+BR14rdoGA91mZjdi"
+        )
     
     user_progress.pop(user_id, None)  # Удаляем данные после обработки
 
 # Отправка анкеты админу
 def send_survey_to_admin(user_id):
-    cursor.execute("SELECT full_name, likes, dislikes, suggestions, gender, age_group, visit_frequency FROM users WHERE user_id = ?", (user_id,))
+    cursor.execute("SELECT full_name, gender, age_group, visit_frequency FROM users WHERE user_id = ?", (user_id,))
     user_data = cursor.fetchone()
     
     if user_data:
-        full_name, likes, dislikes, suggestions, gender, age_group, visit_frequency = user_data
-        survey_text = f"Новая анкета клиента:\n\n"
-        survey_text += f"Имя: {full_name}\n"
-        survey_text += f"Ценит: {likes}\n"
-        survey_text += f"Не нравится: {dislikes}\n"
-        survey_text += f"Предложения: {suggestions}\n"
-        survey_text += f"Пол: {gender}\n"
-        survey_text += f"Возраст: {age_group}\n"
-        survey_text += f"Частота посещений: {visit_frequency}\n"
+        full_name, gender, age_group, visit_frequency = user_data
+        survey_text = f"📋 **Новая анкета клиента:**\n\n"
+        survey_text += f"👤 **Имя:** {full_name}\n"
+        survey_text += f"⚥ **Пол:** {gender}\n"
+        survey_text += f"📅 **Возраст:** {age_group}\n"
+        survey_text += f"🏬 **Частота посещений:** {visit_frequency}\n"
         
         bot.send_message(ADMIN_ID, survey_text)
         

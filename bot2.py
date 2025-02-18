@@ -29,6 +29,29 @@ CREATE TABLE IF NOT EXISTS users (
 """)
 conn.commit()
 
+# Храним ID второго получателя
+recipient_id = None
+
+@bot.message_handler(commands=['set_recipient'])
+def set_recipient(message):
+    """Команда для админа: Установить второго получателя анкет и сообщений"""
+    global recipient_id
+    if str(message.from_user.id) != ADMIN_ID:
+        bot.reply_to(message, "У вас нет прав для выполнения этой команды.")
+        return
+
+    bot.reply_to(message, "Введите ID пользователя, который будет получать анкеты и сообщения от клиентов:")
+    bot.register_next_step_handler(message, save_recipient)
+
+def save_recipient(message):
+    """Сохраняем ID второго получателя"""
+    global recipient_id
+    try:
+        recipient_id = int(message.text)
+        bot.reply_to(message, f"✅ Второй получатель установлен: {recipient_id}")
+    except ValueError:
+        bot.reply_to(message, "⚠ Ошибка! Введите корректный числовой ID.")
+
 # Команда /start
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -119,31 +142,41 @@ def save_age_group(message):
     bot.register_next_step_handler(message, save_visit_frequency)
 
 def save_visit_frequency(message):
+    """Сохранение частоты посещений и отправка анкеты"""
     cursor.execute("UPDATE users SET visit_frequency = ? WHERE user_id = ?", (message.text, message.from_user.id))
     conn.commit()
     
-    # Отправляем анкету админу
     send_survey_to_admin(message.from_user.id)
 
-    bot.send_message(message.chat.id, "Благодарю!\n📞 8-918-5567-53-33\nВот мой номер телефона, по нему вы всегда можете позвонить или написать в WhatsApp/Telegram.\n\nЕсли вам нужна информация о наличии, ценах или вкусах, напишите в наш чат: https://t.me/+BR14rdoGA91mZjdi")
+    bot.send_message(message.chat.id, "Спасибо! Мы ценим ваш отзыв. 📞 8-918-5567-53-33")
 
-# Отправка анкеты админу
 def send_survey_to_admin(user_id):
+    """Отправка анкеты админу и второму получателю"""
     cursor.execute("SELECT full_name, likes, dislikes, suggestions, gender, age_group, visit_frequency FROM users WHERE user_id = ?", (user_id,))
     user_data = cursor.fetchone()
     
     if user_data:
         full_name, likes, dislikes, suggestions, gender, age_group, visit_frequency = user_data
-        survey_text = f"Новая анкета клиента:\n\n"
-        survey_text += f"Имя: {full_name}\n"
-        survey_text += f"Ценит: {likes}\n"
-        survey_text += f"Не нравится: {dislikes}\n"
-        survey_text += f"Предложения: {suggestions}\n"
-        survey_text += f"Пол: {gender}\n"
-        survey_text += f"Возраст: {age_group}\n"
-        survey_text += f"Частота посещений: {visit_frequency}\n"
-        
+        survey_text = f"📋 Новая анкета клиента:\n\n"
+        survey_text += f"👤 Имя: {full_name}\n"
+        survey_text += f"✅ Ценит: {likes}\n"
+        survey_text += f"❌ Не нравится: {dislikes}\n"
+        survey_text += f"💡 Предложения: {suggestions}\n"
+        survey_text += f"⚥ Пол: {gender}\n"
+        survey_text += f"📅 Возраст: {age_group}\n"
+        survey_text += f"📍 Частота посещений: {visit_frequency}\n"
+
         bot.send_message(ADMIN_ID, survey_text)
+        if recipient_id:
+            bot.send_message(recipient_id, survey_text)
+
+@bot.message_handler(func=lambda message: True)
+def forward_messages(message):
+    """Пересылка всех сообщений админу и второму получателю"""
+    if str(message.from_user.id) != ADMIN_ID:
+        bot.forward_message(ADMIN_ID, message.chat.id, message.message_id)
+        if recipient_id:
+            bot.forward_message(recipient_id, message.chat.id, message.message_id)
 
 # Команда для очистки базы
 @bot.message_handler(commands=['clear_database'])

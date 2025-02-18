@@ -173,12 +173,15 @@ def send_survey_to_admin(user_id):
     user_data = cursor.fetchone()
     
     if user_data:
-        full_name, gender, age_group, visit_frequency = user_data
-        survey_text = f"📋 **Новая анкета клиента:**\n\n"
-        survey_text += f"👤 **Имя:** {full_name}\n"
-        survey_text += f"⚥ **Пол:** {gender}\n"
-        survey_text += f"📅 **Возраст:** {age_group}\n"
-        survey_text += f"🏬 **Частота посещений:** {visit_frequency}\n"
+        full_name, likes, dislikes, suggestions, gender, age_group, visit_frequency = user_data
+        survey_text = f"Новая анкета клиента:\n\n"
+        survey_text += f"Имя: {full_name}\n"
+        survey_text += f"Ценит: {likes}\n"
+        survey_text += f"Не нравится: {dislikes}\n"
+        survey_text += f"Предложения: {suggestions}\n"
+        survey_text += f"Пол: {gender}\n"
+        survey_text += f"Возраст: {age_group}\n"
+        survey_text += f"Частота посещений: {visit_frequency}\n"
         
         bot.send_message(ADMIN_ID, survey_text)
         

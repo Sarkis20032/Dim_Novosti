@@ -1,7 +1,6 @@
 import telebot
 from telebot import types
 import sqlite3
-
 import os
 
 TOKEN = os.getenv("TOKEN")
@@ -95,16 +94,10 @@ def save_suggestions(message):
     conn.commit()
     ask_additional_info(message)
 
-# Дополнительные вопросы (пол, возраст, частота посещений)
-def ask_additional_info(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add("Мужской", "Женский")
-    bot.send_message(message.chat.id, "Спасибо огромное за помощь😊\nЯ учту ваши пожелания и постараюсь приложить усилия, чтобы это исправить.\nЕсли не сложно, подскажите ваш пол:", reply_markup=markup)
-    bot.register_next_step_handler(message, save_gender)
-
-# Дополнительные вопросы (пол, возраст, частота посещений)
+# Вопрос о поле, возрасте и частоте посещений (всё в одном сообщении)
 def ask_additional_info(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, row_width=3)
+    
     gender_btns = [types.KeyboardButton("Мужской"), types.KeyboardButton("Женский")]
     age_btns = [types.KeyboardButton("До 22"), types.KeyboardButton("22-30"), types.KeyboardButton("Более 30")]
     visit_btns = [types.KeyboardButton("Был до 3х раз"), types.KeyboardButton("3-8"), types.KeyboardButton("Более 8 раз")]
@@ -116,11 +109,13 @@ def ask_additional_info(message):
     bot.send_message(message.chat.id, "Спасибо огромное за помощь😊\nЯ учту ваши пожелания и постараюсь приложить усилия, чтобы это исправить.\n\nЕсли не сложно, выберите ваш пол, возраст и частоту посещений, нажав на соответствующие кнопки:", reply_markup=markup)
     bot.register_next_step_handler(message, save_additional_info)
 
+# Сохранение пола, возраста и частоты посещений
 def save_additional_info(message):
     responses = message.text.split("\n")
-    if len(responses) >= 3:
-        gender, age_group, visit_frequency = responses[:3]
-        cursor.execute("UPDATE users SET gender = ?, age_group = ?, visit_frequency = ? WHERE user_id = ?", 
+    
+    if len(responses) == 3:
+        gender, age_group, visit_frequency = responses
+        cursor.execute("UPDATE users SET gender = ?, age_group = ?, visit_frequency = ? WHERE user_id = ?",
                        (gender, age_group, visit_frequency, message.from_user.id))
         conn.commit()
         send_survey_to_admin(message.from_user.id)
@@ -128,11 +123,6 @@ def save_additional_info(message):
     else:
         bot.send_message(message.chat.id, "Пожалуйста, выберите все три параметра (пол, возраст, частоту посещений). Попробуйте ещё раз.")
         ask_additional_info(message)
-    
-    # Отправляем анкету админу
-    send_survey_to_admin(message.from_user.id)
-
-    bot.send_message(message.chat.id, "Благодарю!\n📞 8-918-5567-53-33\nВот мой номер телефона, по нему вы всегда можете позвонить или написать в WhatsApp/Telegram.\n\nЕсли вам нужна информация о наличии, ценах или вкусах, напишите в наш чат: https://t.me/+BR14rdoGA91mZjdi")
 
 # Отправка анкеты админу
 def send_survey_to_admin(user_id):
@@ -151,7 +141,7 @@ def send_survey_to_admin(user_id):
         survey_text += f"Частота посещений: {visit_frequency}\n"
         
         bot.send_message(ADMIN_ID, survey_text)
-
+        
 # Команда для очистки базы
 @bot.message_handler(commands=['clear_database'])
 def clear_database(message):

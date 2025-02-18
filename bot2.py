@@ -102,25 +102,32 @@ def ask_additional_info(message):
     bot.send_message(message.chat.id, "Спасибо огромное за помощь😊\nЯ учту ваши пожелания и постараюсь приложить усилия, чтобы это исправить.\nЕсли не сложно, подскажите ваш пол:", reply_markup=markup)
     bot.register_next_step_handler(message, save_gender)
 
-def save_gender(message):
-    cursor.execute("UPDATE users SET gender = ? WHERE user_id = ?", (message.text, message.from_user.id))
-    conn.commit()
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add("До 22", "22-30", "Более 30")
-    bot.send_message(message.chat.id, "Укажите ваш возраст:", reply_markup=markup)
-    bot.register_next_step_handler(message, save_age_group)
+# Дополнительные вопросы (пол, возраст, частота посещений)
+def ask_additional_info(message):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, row_width=3)
+    gender_btns = [types.KeyboardButton("Мужской"), types.KeyboardButton("Женский")]
+    age_btns = [types.KeyboardButton("До 22"), types.KeyboardButton("22-30"), types.KeyboardButton("Более 30")]
+    visit_btns = [types.KeyboardButton("Был до 3х раз"), types.KeyboardButton("3-8"), types.KeyboardButton("Более 8 раз")]
+    
+    markup.add(*gender_btns)
+    markup.add(*age_btns)
+    markup.add(*visit_btns)
+    
+    bot.send_message(message.chat.id, "Спасибо огромное за помощь😊\nЯ учту ваши пожелания и постараюсь приложить усилия, чтобы это исправить.\n\nЕсли не сложно, выберите ваш пол, возраст и частоту посещений, нажав на соответствующие кнопки:", reply_markup=markup)
+    bot.register_next_step_handler(message, save_additional_info)
 
-def save_age_group(message):
-    cursor.execute("UPDATE users SET age_group = ? WHERE user_id = ?", (message.text, message.from_user.id))
-    conn.commit()
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add("Был до 3х раз", "3-8", "Более 8 раз")
-    bot.send_message(message.chat.id, "Как часто вы нас посещали?", reply_markup=markup)
-    bot.register_next_step_handler(message, save_visit_frequency)
-
-def save_visit_frequency(message):
-    cursor.execute("UPDATE users SET visit_frequency = ? WHERE user_id = ?", (message.text, message.from_user.id))
-    conn.commit()
+def save_additional_info(message):
+    responses = message.text.split("\n")
+    if len(responses) >= 3:
+        gender, age_group, visit_frequency = responses[:3]
+        cursor.execute("UPDATE users SET gender = ?, age_group = ?, visit_frequency = ? WHERE user_id = ?", 
+                       (gender, age_group, visit_frequency, message.from_user.id))
+        conn.commit()
+        send_survey_to_admin(message.from_user.id)
+        bot.send_message(message.chat.id, "Благодарю!\n📞 8-918-5567-53-33\nВот мой номер телефона, по нему вы всегда можете позвонить или написать в WhatsApp/Telegram.\n\nЕсли вам нужна информация о наличии, ценах или вкусах, напишите в наш чат: https://t.me/+BR14rdoGA91mZjdi")
+    else:
+        bot.send_message(message.chat.id, "Пожалуйста, выберите все три параметра (пол, возраст, частоту посещений). Попробуйте ещё раз.")
+        ask_additional_info(message)
     
     # Отправляем анкету админу
     send_survey_to_admin(message.from_user.id)

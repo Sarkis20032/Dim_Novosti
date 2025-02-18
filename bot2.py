@@ -29,6 +29,9 @@ CREATE TABLE IF NOT EXISTS users (
 """)
 conn.commit()
 
+# Словарь для отслеживания ответов пользователей
+user_progress = {}
+
 # Команда /start
 @bot.message_handler(commands=['start'])
 def start(message):

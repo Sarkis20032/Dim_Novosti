@@ -1,6 +1,7 @@
 import telebot
 from telebot import types
 import sqlite3
+
 import os
 
 TOKEN = os.getenv("TOKEN")
@@ -28,9 +29,6 @@ CREATE TABLE IF NOT EXISTS users (
 """)
 conn.commit()
 
-# Храним прогресс пользователя
-user_progress = {}
-
 # Команда /start
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -48,48 +46,86 @@ def start(message):
         conn.commit()
         send_intro(message)
 
-# Вопрос о поле, возрасте и частоте посещений (одно сообщение)
+# Отправка вступительного сообщения
+def send_intro(message):
+    bot.send_message(message.chat.id, "Добрый день, меня зовут Давид👋 я владелец сети магазинов 'Дым'💨\nРад знакомству😊\n\nЯ создал этого бота, чтобы дать своим гостям самый лучший сервис и предложение😍\n\nВы хотите, чтобы мы стали лучше для вас?", reply_markup=generate_yes_no_keyboard())
+    bot.register_next_step_handler(message, ask_survey_consent)
+
+# Генерация клавиатуры Да/Нет
+def generate_yes_no_keyboard():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("Да", "Нет")
+    return markup
+
+# Спрашиваем, готов ли пользователь помочь
+def ask_survey_consent(message):
+    bot.send_message(message.chat.id, "Отлично✨\nТут я буду публиковать интересные предложения, розыгрыши и подарки 🎁\n\nНо самое главное, мы хотим улучшить качество нашей работы.\n\nСможете нам помочь, ответив на 3 вопроса?", reply_markup=generate_yes_no_keyboard())
+    bot.register_next_step_handler(message, ask_likes)
+
+# Вопрос о том, что ценят больше всего
+def ask_likes(message):
+    bot.send_message(message.chat.id, "Благодарим за помощь🤝\nПодскажите, какие 2 вещи в наших магазинах вы цените больше всего?")
+    bot.register_next_step_handler(message, save_likes)
+
+# Сохранение ответа о ценностях
+def save_likes(message):
+    cursor.execute("UPDATE users SET likes = ? WHERE user_id = ?", (message.text, message.from_user.id))
+    conn.commit()
+    ask_dislikes(message)
+
+# Вопрос о том, что не нравится
+def ask_dislikes(message):
+    bot.send_message(message.chat.id, "Хорошо😊\nИ еще пару вещей, которые вам больше всего не нравятся?")
+    bot.register_next_step_handler(message, save_dislikes)
+
+# Сохранение ответа о недостатках
+def save_dislikes(message):
+    cursor.execute("UPDATE users SET dislikes = ? WHERE user_id = ?", (message.text, message.from_user.id))
+    conn.commit()
+    ask_suggestions(message)
+
+# Вопрос о предложениях по улучшению
+def ask_suggestions(message):
+    bot.send_message(message.chat.id, "Отлично и последний вопрос)\nЧто бы вы изменили, будучи на моем месте, чтобы стать лучше?")
+    bot.register_next_step_handler(message, save_suggestions)
+
+# Сохранение предложений
+def save_suggestions(message):
+    cursor.execute("UPDATE users SET suggestions = ? WHERE user_id = ?", (message.text, message.from_user.id))
+    conn.commit()
+    ask_additional_info(message)
+
+# Дополнительные вопросы (пол, возраст, частота посещений)
 def ask_additional_info(message):
-    user_progress[message.from_user.id] = {"answers": []}  # Создаём запись в словаре
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("Мужской", "Женский")
+    bot.send_message(message.chat.id, "Спасибо огромное за помощь😊\nЯ учту ваши пожелания и постараюсь приложить усилия, чтобы это исправить.\nЕсли не сложно, подскажите ваш пол:", reply_markup=markup)
+    bot.register_next_step_handler(message, save_gender)
 
-    bot.send_message(message.chat.id, 
-                     "Спасибо огромное за помощь😊\nЯ учту ваши пожелания и постараюсь приложить усилия, чтобы это исправить.\n\n"
-                     "Ответьте на три вопроса одним за другим:\n"
-                     "1️⃣ Ваш пол (Мужской / Женский)\n"
-                     "2️⃣ Ваш возраст (До 22 / 22-30 / Более 30)\n"
-                     "3️⃣ Как часто посещали наш магазин? (Был до 3х раз / 3-8 / Более 8 раз)")
-    
-    bot.register_next_step_handler(message, collect_three_answers)
+def save_gender(message):
+    cursor.execute("UPDATE users SET gender = ? WHERE user_id = ?", (message.text, message.from_user.id))
+    conn.commit()
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("До 22", "22-30", "Более 30")
+    bot.send_message(message.chat.id, "Укажите ваш возраст:", reply_markup=markup)
+    bot.register_next_step_handler(message, save_age_group)
 
-# Получаем три последовательных ответа
-def collect_three_answers(message):
-    user_id = message.from_user.id
-    
-    if user_id not in user_progress:
-        user_progress[user_id] = {"answers": []}
-    
-    user_progress[user_id]["answers"].append(message.text)  # Добавляем ответ в список
-    
-    if len(user_progress[user_id]["answers"]) < 3:
-        bot.register_next_step_handler(message, collect_three_answers)  # Ждём следующий ответ
-    else:
-        save_additional_info(message)
+def save_age_group(message):
+    cursor.execute("UPDATE users SET age_group = ? WHERE user_id = ?", (message.text, message.from_user.id))
+    conn.commit()
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("Был до 3х раз", "3-8", "Более 8 раз")
+    bot.send_message(message.chat.id, "Как часто вы нас посещали?", reply_markup=markup)
+    bot.register_next_step_handler(message, save_visit_frequency)
 
-# Сохранение ответов в БД
-def save_additional_info(message):
-    user_id = message.from_user.id
-    answers = user_progress.get(user_id, {}).get("answers", [])
+def save_visit_frequency(message):
+    cursor.execute("UPDATE users SET visit_frequency = ? WHERE user_id = ?", (message.text, message.from_user.id))
+    conn.commit()
     
-    if len(answers) == 3:
-        gender, age_group, visit_frequency = answers
-        cursor.execute("UPDATE users SET gender = ?, age_group = ?, visit_frequency = ? WHERE user_id = ?",
-                       (gender, age_group, visit_frequency, user_id))
-        conn.commit()
-        send_survey_to_admin(user_id)
-        bot.send_message(message.chat.id, "Благодарю!\n📞 8-918-5567-53-33\nВот мой номер телефона, по нему вы всегда можете позвонить или написать в WhatsApp/Telegram.\n\n"
-                                          "Если вам нужна информация о наличии, ценах или вкусах, напишите в наш чат: https://t.me/+BR14rdoGA91mZjdi")
-    
-    user_progress.pop(user_id, None)  # Удаляем данные после обработки
+    # Отправляем анкету админу
+    send_survey_to_admin(message.from_user.id)
+
+    bot.send_message(message.chat.id, "Благодарю!\n📞 8-918-5567-53-33\nВот мой номер телефона, по нему вы всегда можете позвонить или написать в WhatsApp/Telegram.\n\nЕсли вам нужна информация о наличии, ценах или вкусах, напишите в наш чат: https://t.me/+BR14rdoGA91mZjdi")
 
 # Отправка анкеты админу
 def send_survey_to_admin(user_id):

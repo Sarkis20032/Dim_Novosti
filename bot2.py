@@ -191,4 +191,4 @@ def perform_broadcast(message):
     bot.reply_to(message, "Рассылка завершена.")
 
 # Запуск бота
-bot.polling(non_stop=True)
+bot.polling(non_stop=True, skip_pending=True)

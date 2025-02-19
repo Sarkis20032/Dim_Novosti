@@ -100,6 +100,7 @@ def log_message(message):
     cursor.execute("INSERT INTO messages (user_id, message) VALUES (?, ?)", (message.from_user.id, message.text))
     conn.commit()
     bot.reply_to(message, "Ваше сообщение записано!")
+    
 # Команда /start
 @bot.message_handler(commands=['start'])
 def start(message):

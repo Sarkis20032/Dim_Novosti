@@ -126,10 +126,19 @@ def forward_message_to_client(message, user_id):
     except Exception as e:
         bot.reply_to(message, f"Ошибка отправки: {e}")
 
-# Запоминаем входящие сообщения (только если клиент прошёл анкету)
 @bot.message_handler(func=lambda message: True)
 def check_survey(message):
     user_id = message.from_user.id
+    username = message.from_user.username
+    full_name = f"{message.from_user.first_name} {message.from_user.last_name or ''}"
+
+    # Добавляем пользователя в базу, если его там нет
+    safe_execute(
+        "INSERT OR IGNORE INTO users (user_id, username, full_name) VALUES (?, ?, ?)",
+        (user_id, username, full_name),
+    )
+
+    # Проверяем, прошёл ли он анкетирование
     cursor.execute("SELECT survey_completed FROM users WHERE user_id = ?", (user_id,))
     result = cursor.fetchone()
 
@@ -138,20 +147,25 @@ def check_survey(message):
     else:
         bot.send_message(message.chat.id, "Сначала пройдите анкетирование! Напишите /start.")
 
-# Команда /start
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
     username = message.from_user.username
     full_name = f"{message.from_user.first_name} {message.from_user.last_name or ''}"
 
-    cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
-    user = cursor.fetchone()
+    # Добавляем пользователя в базу, если его нет
+    safe_execute(
+        "INSERT OR IGNORE INTO users (user_id, username, full_name) VALUES (?, ?, ?)",
+        (user_id, username, full_name),
+    )
 
-    if user:
+    # Проверяем, прошёл ли пользователь анкету
+    cursor.execute("SELECT survey_completed FROM users WHERE user_id = ?", (user_id,))
+    result = cursor.fetchone()
+
+    if result and result[0] == 1:
         bot.reply_to(message, "Вы уже проходили анкету. Спасибо!")
     else:
-        safe_execute("INSERT OR IGNORE INTO users (user_id, username, full_name) VALUES (?, ?, ?)", (user_id, username, full_name))
         send_intro(message)
 
 # Отправка вступительного сообщения

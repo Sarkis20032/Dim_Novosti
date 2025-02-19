@@ -9,6 +9,10 @@ ADMIN_ID = os.getenv("ADMIN_ID")
 
 bot = telebot.TeleBot(TOKEN)
 
+# Подключение к базе данных
+conn = sqlite3.connect("bot_database.db", check_same_thread=False)
+cursor = conn.cursor()
+
 # Создание таблицы пользователей
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
@@ -96,7 +100,6 @@ def log_message(message):
     cursor.execute("INSERT INTO messages (user_id, message) VALUES (?, ?)", (message.from_user.id, message.text))
     conn.commit()
     bot.reply_to(message, "Ваше сообщение записано!")
-
 # Команда /start
 @bot.message_handler(commands=['start'])
 def start(message):

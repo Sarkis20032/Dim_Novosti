@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS messages (
 @app.route("/" + TOKEN, methods=["POST"])
 def webhook():
     """Приём входящих запросов от Telegram"""
-    update = Update.de_json(request.get_json(), bot)
+    update = Update.de_json(request.get_json())
     bot.process_new_updates([update])
     return "OK", 200
 

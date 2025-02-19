@@ -2,19 +2,38 @@ import telebot
 from telebot import types
 import sqlite3
 import os
+import threading
+import time
 
+# Загрузка переменных окружения
 TOKEN = os.getenv("TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID"))  # Преобразуем в int
-ADMIN_IDS = {ADMIN_ID}  # Множество администраторов
+ADMIN_ID = os.getenv("ADMIN_ID")
+
+if not TOKEN:
+    raise ValueError("TOKEN не задан!")
+if not ADMIN_ID or not ADMIN_ID.isdigit():
+    raise ValueError("ADMIN_ID не задан или неверен!")
+
+ADMIN_ID = int(ADMIN_ID)
+ADMIN_IDS = {ADMIN_ID}
 
 bot = telebot.TeleBot(TOKEN)
+
+# Блокировка для безопасного доступа к БД
+db_lock = threading.Lock()
 
 # Подключение к базе данных
 conn = sqlite3.connect("bot_database.db", check_same_thread=False)
 cursor = conn.cursor()
 
-# Создание таблицы пользователей
-cursor.execute("""
+# Функция безопасного выполнения SQL-запросов
+def safe_execute(query, params=()):
+    with db_lock:
+        cursor.execute(query, params)
+        conn.commit()
+
+# Создание таблиц
+safe_execute("""
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
     username TEXT,
@@ -25,13 +44,11 @@ CREATE TABLE IF NOT EXISTS users (
     gender TEXT,
     age_group TEXT,
     visit_frequency TEXT,
-    survey_completed INTEGER DEFAULT 0  -- Добавили флаг прохождения анкеты
+    survey_completed INTEGER DEFAULT 0
 )
 """)
-conn.commit()
 
-# Создание таблицы сообщений
-cursor.execute("""
+safe_execute("""
 CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
@@ -39,9 +56,8 @@ CREATE TABLE IF NOT EXISTS messages (
     FOREIGN KEY(user_id) REFERENCES users(user_id)
 )
 """)
-conn.commit()
 
-# Добавление администратора
+# Команда для добавления администратора
 @bot.message_handler(commands=['add_admin'])
 def add_admin(message):
     if message.from_user.id not in ADMIN_IDS:
@@ -58,7 +74,7 @@ def save_admin(message):
     except ValueError:
         bot.reply_to(message, "Ошибка! Введите корректный ID.")
 
-# Переписка с клиентами
+# Команда для переписки с клиентами
 @bot.message_handler(commands=['message'])
 def select_client(message):
     if message.from_user.id not in ADMIN_IDS:
@@ -86,11 +102,8 @@ def forward_message_to_client(message, user_id):
 @bot.message_handler(func=lambda message: True)
 def check_survey(message):
     user_id = message.from_user.id
-
     cursor.execute("SELECT survey_completed FROM users WHERE user_id = ?", (user_id,))
     result = cursor.fetchone()
-    
-    bot.send_message(message.chat.id, f"DEBUG: survey_completed = {result}")  # Отладочное сообщение
 
     if result and result[0] == 1:
         bot.send_message(message.chat.id, "Вы прошли анкетирование! Можете пользоваться ботом.")
@@ -110,8 +123,7 @@ def start(message):
     if user:
         bot.reply_to(message, "Вы уже проходили анкету. Спасибо!")
     else:
-        cursor.execute("INSERT OR IGNORE INTO users (user_id, username, full_name) VALUES (?, ?, ?)", (user_id, username, full_name))
-        conn.commit()
+        safe_execute("INSERT OR IGNORE INTO users (user_id, username, full_name) VALUES (?, ?, ?)", (user_id, username, full_name))
         send_intro(message)
 
 # Отправка вступительного сообщения
@@ -124,19 +136,17 @@ def generate_yes_no_keyboard():
     markup.add("Да", "Нет")
     return markup
 
-# Спрашиваем, готов ли пользователь помочь
+# Анкетирование
 def ask_survey_consent(message):
     bot.send_message(message.chat.id, "Отлично!...\nСможете нам помочь, ответив на 3 вопроса?", reply_markup=generate_yes_no_keyboard())
     bot.register_next_step_handler(message, ask_likes)
 
-# Анкетирование
 def ask_likes(message):
     bot.send_message(message.chat.id, "Какие 2 вещи в наших магазинах вы цените больше всего?")
     bot.register_next_step_handler(message, save_likes)
 
 def save_likes(message):
-    cursor.execute("UPDATE users SET likes = ? WHERE user_id = ?", (message.text, message.from_user.id))
-    conn.commit()
+    safe_execute("UPDATE users SET likes = ? WHERE user_id = ?", (message.text, message.from_user.id))
     ask_dislikes(message)
 
 def ask_dislikes(message):
@@ -144,8 +154,7 @@ def ask_dislikes(message):
     bot.register_next_step_handler(message, save_dislikes)
 
 def save_dislikes(message):
-    cursor.execute("UPDATE users SET dislikes = ? WHERE user_id = ?", (message.text, message.from_user.id))
-    conn.commit()
+    safe_execute("UPDATE users SET dislikes = ? WHERE user_id = ?", (message.text, message.from_user.id))
     ask_suggestions(message)
 
 def ask_suggestions(message):
@@ -153,21 +162,19 @@ def ask_suggestions(message):
     bot.register_next_step_handler(message, save_suggestions)
 
 def save_suggestions(message):
-    cursor.execute("UPDATE users SET suggestions = ?, survey_completed = 1 WHERE user_id = ?", (message.text, message.from_user.id))
-    conn.commit()
+    safe_execute("UPDATE users SET suggestions = ?, survey_completed = 1 WHERE user_id = ?", (message.text, message.from_user.id))
     bot.send_message(message.chat.id, "Спасибо за анкету! Теперь вы можете писать нам сообщения.")
 
-# Команда для очистки базы
+# Команда очистки базы
 @bot.message_handler(commands=['clear_database'])
 def clear_database(message):
     if message.from_user.id in ADMIN_IDS:
-        cursor.execute("DELETE FROM users")
-        conn.commit()
+        safe_execute("DELETE FROM users")
         bot.reply_to(message, "База данных успешно очищена.")
     else:
         bot.reply_to(message, "У вас нет прав на выполнение этой команды.")
 
-# Команда для просмотра базы
+# Команда просмотра базы
 @bot.message_handler(commands=['count_clients'])
 def count_clients(message):
     cursor.execute("SELECT COUNT(*) FROM users")
@@ -192,5 +199,10 @@ def perform_broadcast(message):
             pass
     bot.reply_to(message, "Рассылка завершена.")
 
-# Запуск бота
-bot.polling(non_stop=True, skip_pending=True)
+# Запуск бота с обработкой ошибок
+while True:
+    try:
+        bot.polling(non_stop=True, skip_pending=True)
+    except Exception as e:
+        print(f"Ошибка в polling: {e}")
+        time.sleep(5)  # Ожидание перед перезапуском

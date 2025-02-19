@@ -4,7 +4,7 @@ import sqlite3
 import os
 
 TOKEN = os.getenv("TOKEN")
-ADMIN_IDS = [int(os.getenv("ADMIN_ID")), int(os.getenv("ADMIN_ID_2"))]  # Приводим ID к int
+ADMIN_IDS = [int(os.getenv("ADMIN_ID")), int(os.getenv("ADMIN_ID_2"))]  # Приведение ID к int
 admin_clients = {}  # Словарь для привязки клиента к админу
 
 bot = telebot.TeleBot(TOKEN)
@@ -45,9 +45,8 @@ def start(message):
         cursor.execute("INSERT OR IGNORE INTO users (user_id, username, full_name) VALUES (?, ?, ?)", (user_id, username, full_name))
         conn.commit()
 
-        # Равномерное распределение клиентов между администраторами
         assigned_admin = ADMIN_IDS[len(admin_clients) % len(ADMIN_IDS)]
-        admin_clients[user_id] = assigned_admin  # Привязываем клиента к админу
+        admin_clients[user_id] = assigned_admin  
 
         bot.send_message(
             message.chat.id, 
@@ -103,54 +102,47 @@ def ask_suggestions(message):
 def save_suggestions(message):
     cursor.execute("UPDATE users SET suggestions = ? WHERE user_id = ?", (message.text, message.from_user.id))
     conn.commit()
-    ask_additional_info(message)
+    ask_gender(message)
 
-# Отправка анкеты админу
-def send_survey_to_admin(user_id):
-    cursor.execute("SELECT full_name, likes, dislikes, suggestions, gender, age_group, visit_frequency FROM users WHERE user_id = ?", (user_id,))
-    user_data = cursor.fetchone()
-    
-    if user_data:
-        full_name, likes, dislikes, suggestions, gender, age_group, visit_frequency = user_data
-        survey_text = (
-            f"📋 Новая анкета клиента:\n\n"
-            f"👤 Имя: {full_name}\n"
-            f"✅ Ценит: {likes}\n"
-            f"❌ Не нравится: {dislikes}\n"
-            f"💡 Предложения: {suggestions}\n"
-            f"🧑‍🤝‍🧑 Пол: {gender}\n"
-            f"📅 Возраст: {age_group}\n"
-            f"📍 Частота посещений: {visit_frequency}"
-        )
-        
-        admin_id = admin_clients.get(user_id, ADMIN_IDS[0])  # Назначенный админ
-        bot.send_message(admin_id, survey_text)
+# Вопрос о поле пользователя
+def ask_gender(message):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("Мужской", "Женский")
+    bot.send_message(message.chat.id, "Какой у вас пол?", reply_markup=markup)
+    bot.register_next_step_handler(message, save_gender)
 
-# Команда для очистки базы
-@bot.message_handler(commands=['clear_database'])
-def clear_database(message):
-    cursor.execute("DELETE FROM users")
+def save_gender(message):
+    cursor.execute("UPDATE users SET gender = ? WHERE user_id = ?", (message.text, message.from_user.id))
     conn.commit()
-    bot.reply_to(message, "База данных успешно очищена.")
+    ask_age_group(message)
 
-# Команда для рассылки
-@bot.message_handler(commands=['broadcast'])
-def broadcast(message):
-    if message.from_user.id not in ADMIN_IDS:
-        bot.reply_to(message, "У вас нет прав для выполнения этой команды.")
-        return
-    bot.reply_to(message, "Введите текст для рассылки:")
-    bot.register_next_step_handler(message, perform_broadcast)
+def ask_age_group(message):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("18-25", "26-35", "36-45", "46+")
+    bot.send_message(message.chat.id, "Выберите вашу возрастную группу:", reply_markup=markup)
+    bot.register_next_step_handler(message, save_age_group)
 
-def perform_broadcast(message):
-    cursor.execute("SELECT user_id FROM users")
-    user_ids = cursor.fetchall()
-    for user_id in user_ids:
-        try:
-            bot.send_message(user_id[0], message.text)
-        except:
-            pass
-    bot.reply_to(message, "Рассылка завершена.")
+def save_age_group(message):
+    cursor.execute("UPDATE users SET age_group = ? WHERE user_id = ?", (message.text, message.from_user.id))
+    conn.commit()
+    ask_visit_frequency(message)
 
-# Запуск бота
+def ask_visit_frequency(message):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("Раз в неделю", "Раз в месяц", "Раз в полгода", "Редко")
+    bot.send_message(message.chat.id, "Как часто вы посещаете наши магазины?", reply_markup=markup)
+    bot.register_next_step_handler(message, save_visit_frequency)
+
+def save_visit_frequency(message):
+    cursor.execute("UPDATE users SET visit_frequency = ? WHERE user_id = ?", (message.text, message.from_user.id))
+    conn.commit()
+    bot.send_message(message.chat.id, "Спасибо за участие в опросе! 😊")
+    send_survey_to_admin(message.from_user.id)
+
+@bot.message_handler(commands=['count_clients'])
+def count_clients(message):
+    cursor.execute("SELECT COUNT(*) FROM users")
+    count = cursor.fetchone()[0]
+    bot.reply_to(message, f"Количество клиентов в базе: {count}")
+
 bot.polling(non_stop=True)

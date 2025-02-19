@@ -1,16 +1,18 @@
-import telebot
-from telebot import types
-import sqlite3
 import os
+import telebot
+from telebot.types import Update
+from flask import Flask, request
+import sqlite3
 import threading
-import time
 
 # Загрузка переменных окружения
 TOKEN = os.getenv("TOKEN")
-ADMIN_ID = os.getenv("ADMIN_ID")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # Домен, например, https://yourapp.railway.app
 
-if not TOKEN:
-    raise ValueError("TOKEN не задан!")
+if not TOKEN or not WEBHOOK_URL:
+    raise ValueError("Необходимо задать TOKEN и WEBHOOK_URL в переменных окружения!")
+
+ADMIN_ID = os.getenv("ADMIN_ID")
 if not ADMIN_ID or not ADMIN_ID.isdigit():
     raise ValueError("ADMIN_ID не задан или неверен!")
 
@@ -18,6 +20,7 @@ ADMIN_ID = int(ADMIN_ID)
 ADMIN_IDS = {ADMIN_ID}
 
 bot = telebot.TeleBot(TOKEN)
+app = Flask(__name__)
 
 # Блокировка для безопасного доступа к БД
 db_lock = threading.Lock()
@@ -56,6 +59,31 @@ CREATE TABLE IF NOT EXISTS messages (
     FOREIGN KEY(user_id) REFERENCES users(user_id)
 )
 """)
+
+# === ROUTES ДЛЯ WEBHOOK ===
+@app.route("/" + TOKEN, methods=["POST"])
+def webhook():
+    """Приём входящих запросов от Telegram"""
+    update = Update.de_json(request.get_json(), bot)
+    bot.process_new_updates([update])
+    return "OK", 200
+
+@app.route("/set_webhook", methods=["GET"])
+def set_webhook():
+    """Установка Webhook"""
+    webhook_url = f"{WEBHOOK_URL}/{TOKEN}"
+    success = bot.set_webhook(url=webhook_url)
+    return f"Webhook установлен: {success}", 200
+
+@app.route("/delete_webhook", methods=["GET"])
+def delete_webhook():
+    """Удаление Webhook"""
+    bot.delete_webhook()
+    return "Webhook удалён", 200
+
+@app.route("/", methods=["GET"])
+def index():
+    return "Бот работает через Webhook!", 200
 
 # Команда для добавления администратора
 @bot.message_handler(commands=['add_admin'])
@@ -199,10 +227,5 @@ def perform_broadcast(message):
             pass
     bot.reply_to(message, "Рассылка завершена.")
 
-# Запуск бота с обработкой ошибок
-while True:
-    try:
-        bot.polling(non_stop=True, skip_pending=True)
-    except Exception as e:
-        print(f"Ошибка в polling: {e}")
-        time.sleep(5)  # Ожидание перед перезапуском
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))

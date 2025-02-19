@@ -5,7 +5,8 @@ import sqlite3
 import os
 
 TOKEN = os.getenv("TOKEN")
-ADMIN_ID = os.getenv("ADMIN_ID")
+ADMIN_IDS = [os.getenv("ADMIN_ID"), os.getenv("ADMIN_ID_2")]  # Список ID админов
+admin_clients = {}  # Словарь для привязки клиента к админу
 
 bot = telebot.TeleBot(TOKEN)
 
@@ -47,7 +48,9 @@ def start(message):
         send_intro(message)
 
 # Отправка вступительного сообщения
-def send_intro(message):
+def assigned_admin = ADMIN_IDS[len(admin_clients) % len(ADMIN_IDS)]  # Равномерное распределение клиентов
+admin_clients[message.from_user.id] = assigned_admin  # Привязка клиента к админу
+send_intro(message)
     bot.send_message(message.chat.id, "Добрый день, меня зовут Давид👋 я владелец сети магазинов 'Дым'💨\nРад знакомству😊\n\nЯ создал этого бота, чтобы дать своим гостям самый лучший сервис и предложение😍\n\nВы хотите, чтобы мы стали лучше для вас?", reply_markup=generate_yes_no_keyboard())
     bot.register_next_step_handler(message, ask_survey_consent)
 
@@ -64,7 +67,7 @@ def ask_survey_consent(message):
 
 # Вопрос о том, что ценят больше всего
 def ask_likes(message):
-    bot.send_message(message.chat.id, "Благодарим за помощь🤝\nПодскажите, какие 2 вещи в наших магазинах вы цените больше всего?😍")
+    bot.send_message(message.chat.id, "Благодарим за помощь🤝\nПодскажите, какие 2 вещи в наших магазинах вы цените больше всего?")
     bot.register_next_step_handler(message, save_likes)
 
 # Сохранение ответа о ценностях
@@ -75,7 +78,7 @@ def save_likes(message):
 
 # Вопрос о том, что не нравится
 def ask_dislikes(message):
-    bot.send_message(message.chat.id, "Хорошо😊\nИ еще пару вещей, которые вам больше всего не нравятся?👿")
+    bot.send_message(message.chat.id, "Хорошо😊\nИ еще пару вещей, которые вам больше всего не нравятся?")
     bot.register_next_step_handler(message, save_dislikes)
 
 # Сохранение ответа о недостатках
@@ -177,6 +180,24 @@ def perform_broadcast(message):
         except:
             pass
     bot.reply_to(message, "Рассылка завершена.")
+
+# Пересылаем сообщения клиента назначенному админу
+@bot.message_handler(func=lambda message: message.chat.id not in ADMIN_IDS)
+def forward_to_admin(message):
+    admin_id = admin_clients.get(message.from_user.id, ADMIN_IDS[0])  # Если нет привязки, отправляем первому админу
+    bot.send_message(admin_id, f"Сообщение от {message.from_user.first_name}:\n\n{message.text}")
+
+# Позволяем админу отвечать клиенту
+@bot.message_handler(func=lambda message: message.chat.id in ADMIN_IDS and message.reply_to_message)
+def reply_to_client(message):
+    text = message.text
+    client_id = int(message.reply_to_message.text.split("\n")[0].split(" ")[-1])  # Парсим ID клиента из пересланного сообщения
+
+    if client_id:
+        bot.send_message(client_id, f"Ответ от администратора:\n\n{text}")
+        bot.send_message(message.chat.id, "Ответ отправлен клиенту.")
+    else:
+        bot.send_message(message.chat.id, "Ошибка: Не удалось определить ID клиента.")
 
 # Запуск бота
 bot.polling(non_stop=True)

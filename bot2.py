@@ -84,16 +84,18 @@ def forward_message_to_client(message, user_id):
 
 # Запоминаем входящие сообщения (только если клиент прошёл анкету)
 @bot.message_handler(func=lambda message: True)
-def log_message(message):
-    cursor.execute("SELECT survey_completed FROM users WHERE user_id = ?", (message.from_user.id,))
+def check_survey(message):
+    user_id = message.from_user.id
+
+    cursor.execute("SELECT survey_completed FROM users WHERE user_id = ?", (user_id,))
     result = cursor.fetchone()
     
-    if result and result[0] == 1:  # Проверяем, прошёл ли пользователь анкету
-        cursor.execute("INSERT INTO messages (user_id, message) VALUES (?, ?)", (message.from_user.id, message.text))
-        conn.commit()
-        bot.reply_to(message, "Ваше сообщение записано!")
+    bot.send_message(message.chat.id, f"DEBUG: survey_completed = {result}")  # Отладочное сообщение
+
+    if result and result[0] == 1:
+        bot.send_message(message.chat.id, "Вы прошли анкетирование! Можете пользоваться ботом.")
     else:
-        bot.reply_to(message, "Вы не прошли анкетирование. Пройдите анкету, чтобы отправлять сообщения.")
+        bot.send_message(message.chat.id, "Сначала пройдите анкетирование! Напишите /start.")
 
 # Команда /start
 @bot.message_handler(commands=['start'])

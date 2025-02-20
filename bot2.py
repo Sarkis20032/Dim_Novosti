@@ -10,7 +10,7 @@ ADMIN_ID = os.getenv("ADMIN_ID")
 bot = telebot.TeleBot(TOKEN)
 
 # Подключение к базе данных SQLite
-conn = sqlite3.connect('clients.db', check_same_thread=False, detect_types=sqlite3.PARSE_DECLTYPES)
+conn = sqlite3.connect('clients.db', check_same_thread=False)
 cursor = conn.cursor()
 
 # Создание таблицы пользователей
@@ -64,7 +64,7 @@ def ask_survey_consent(message):
 
 # Вопрос о том, что ценят больше всего
 def ask_likes(message):
-    bot.send_message(message.chat.id, "Благодарим за помощь🤝\nПодскажите, какие 2 вещи в наших магазинах вы цените больше всего?😍")
+    bot.send_message(message.chat.id, "Благодарим за помощь🤝\nПодскажите, какие 2 вещи в наших магазинах вы цените больше всего?")
     bot.register_next_step_handler(message, save_likes)
 
 # Сохранение ответа о ценностях
@@ -75,7 +75,7 @@ def save_likes(message):
 
 # Вопрос о том, что не нравится
 def ask_dislikes(message):
-    bot.send_message(message.chat.id, "Хорошо😊\nИ еще пару вещей, которые вам больше всего не нравятся?👿")
+    bot.send_message(message.chat.id, "Хорошо😊\nИ еще пару вещей, которые вам больше всего не нравятся?")
     bot.register_next_step_handler(message, save_dislikes)
 
 # Сохранение ответа о недостатках
@@ -171,13 +171,12 @@ def broadcast(message):
 def perform_broadcast(message):
     cursor.execute("SELECT user_id FROM users")
     user_ids = cursor.fetchall()
-    failed = 0
     for user_id in user_ids:
         try:
             bot.send_message(user_id[0], message.text)
-        except Exception as e:
-            failed += 1
-    bot.reply_to(message, f"Рассылка завершена. Ошибок: {failed}")
+        except:
+            pass
+    bot.reply_to(message, "Рассылка завершена.")
 
-bot.remove_webhook()
-bot.set_webhook(url="https://worker-production-8d54.up.railway.app")
+# Запуск бота
+bot.polling(non_stop=True)

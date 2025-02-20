@@ -179,5 +179,5 @@ def perform_broadcast(message):
             failed += 1
     bot.reply_to(message, f"Рассылка завершена. Ошибок: {failed}")
 
-# Запуск бота
-bot.polling(non_stop=True)
+bot.remove_webhook()
+bot.set_webhook(url="https://worker-production-8d54.up.railway.app")

@@ -10,7 +10,7 @@ ADMIN_ID = os.getenv("ADMIN_ID")
 bot = telebot.TeleBot(TOKEN)
 
 # Подключение к базе данных SQLite
-conn = sqlite3.connect('clients.db', check_same_thread=False)
+conn = sqlite3.connect('clients.db', check_same_thread=False, detect_types=sqlite3.PARSE_DECLTYPES)
 cursor = conn.cursor()
 
 # Создание таблицы пользователей
@@ -171,12 +171,13 @@ def broadcast(message):
 def perform_broadcast(message):
     cursor.execute("SELECT user_id FROM users")
     user_ids = cursor.fetchall()
+    failed = 0
     for user_id in user_ids:
         try:
             bot.send_message(user_id[0], message.text)
-        except:
-            pass
-    bot.reply_to(message, "Рассылка завершена.")
+        except Exception as e:
+            failed += 1
+    bot.reply_to(message, f"Рассылка завершена. Ошибок: {failed}")
 
 # Запуск бота
 bot.polling(non_stop=True)

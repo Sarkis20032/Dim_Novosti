@@ -1,42 +1,20 @@
-import os
 import telebot
-from telebot.types import Update
-from flask import Flask, request
+from telebot import types
 import sqlite3
-import threading
 
-# Загрузка переменных окружения
+import os
+
 TOKEN = os.getenv("TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # Домен, например, https://yourapp.railway.app
-
-if not TOKEN or not WEBHOOK_URL:
-    raise ValueError("Необходимо задать TOKEN и WEBHOOK_URL в переменных окружения!")
-
 ADMIN_ID = os.getenv("ADMIN_ID")
-if not ADMIN_ID or not ADMIN_ID.isdigit():
-    raise ValueError("ADMIN_ID не задан или неверен!")
-
-ADMIN_ID = int(ADMIN_ID)
-ADMIN_IDS = {ADMIN_ID}
 
 bot = telebot.TeleBot(TOKEN)
-app = Flask(__name__)
 
-# Блокировка для безопасного доступа к БД
-db_lock = threading.Lock()
-
-# Подключение к базе данных
-conn = sqlite3.connect("bot_database.db", check_same_thread=False)
+# Подключение к базе данных SQLite
+conn = sqlite3.connect('clients.db', check_same_thread=False)
 cursor = conn.cursor()
 
-# Функция безопасного выполнения SQL-запросов
-def safe_execute(query, params=()):
-    with db_lock:
-        cursor.execute(query, params)
-        conn.commit()
-
-# Создание таблиц
-safe_execute("""
+# Создание таблицы пользователей
+cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
     username TEXT,
@@ -46,177 +24,135 @@ CREATE TABLE IF NOT EXISTS users (
     suggestions TEXT,
     gender TEXT,
     age_group TEXT,
-    visit_frequency TEXT,
-    survey_completed INTEGER DEFAULT 0
+    visit_frequency TEXT
 )
 """)
+conn.commit()
 
-safe_execute("""
-CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    message TEXT,
-    FOREIGN KEY(user_id) REFERENCES users(user_id)
-)
-""")
-
-# === ROUTES ДЛЯ WEBHOOK ===
-@app.route("/" + TOKEN, methods=["POST"])
-def webhook():
-    """Приём входящих запросов от Telegram"""
-    update = Update.de_json(request.get_json())
-    bot.process_new_updates([update])
-    return "OK", 200
-
-@app.route("/set_webhook", methods=["GET"])
-def set_webhook():
-    """Установка Webhook"""
-    webhook_url = f"{WEBHOOK_URL}/{TOKEN}"
-    success = bot.set_webhook(url=webhook_url)
-    return f"Webhook установлен: {success}", 200
-
-@app.route("/delete_webhook", methods=["GET"])
-def delete_webhook():
-    """Удаление Webhook"""
-    bot.delete_webhook()
-    return "Webhook удалён", 200
-
-@app.route("/", methods=["GET"])
-def index():
-    return "Бот работает через Webhook!", 200
-
-# Команда для добавления администратора
-@bot.message_handler(commands=['add_admin'])
-def add_admin(message):
-    if message.from_user.id not in ADMIN_IDS:
-        bot.reply_to(message, "У вас нет прав для выполнения этой команды.")
-        return
-    bot.reply_to(message, "Введите ID нового администратора:")
-    bot.register_next_step_handler(message, save_admin)
-
-def save_admin(message):
-    try:
-        new_admin_id = int(message.text)
-        ADMIN_IDS.add(new_admin_id)
-        bot.reply_to(message, f"Администратор {new_admin_id} добавлен!")
-    except ValueError:
-        bot.reply_to(message, "Ошибка! Введите корректный ID.")
-
-# Команда для переписки с клиентами
-@bot.message_handler(commands=['message'])
-def select_client(message):
-    if message.from_user.id not in ADMIN_IDS:
-        bot.reply_to(message, "У вас нет прав.")
-        return
-    bot.reply_to(message, "Введите ID клиента, которому хотите написать:")
-    bot.register_next_step_handler(message, send_message_to_client)
-
-def send_message_to_client(message):
-    try:
-        user_id = int(message.text.strip())
-        bot.reply_to(message, "Введите сообщение клиенту:")
-        bot.register_next_step_handler(message, lambda msg: forward_message_to_client(msg, user_id))
-    except ValueError:
-        bot.reply_to(message, "Ошибка! Введите корректный ID.")
-
-def forward_message_to_client(message, user_id):
-    try:
-        bot.send_message(user_id, message.text)
-        bot.reply_to(message, "Сообщение отправлено!")
-    except Exception as e:
-        bot.reply_to(message, f"Ошибка отправки: {e}")
-
-@bot.message_handler(func=lambda message: True)
-def check_survey(message):
-    user_id = message.from_user.id
-    username = message.from_user.username
-    full_name = f"{message.from_user.first_name} {message.from_user.last_name or ''}"
-
-    # Добавляем пользователя в базу, если его там нет
-    safe_execute(
-        "INSERT OR IGNORE INTO users (user_id, username, full_name) VALUES (?, ?, ?)",
-        (user_id, username, full_name),
-    )
-
-    # Проверяем, прошёл ли он анкетирование
-    cursor.execute("SELECT survey_completed FROM users WHERE user_id = ?", (user_id,))
-    result = cursor.fetchone()
-
-    if result and result[0] == 1:
-        bot.send_message(message.chat.id, "Вы прошли анкетирование! Можете пользоваться ботом.")
-    else:
-        bot.send_message(message.chat.id, "Сначала пройдите анкетирование! Напишите /start.")
-
+# Команда /start
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
     username = message.from_user.username
     full_name = f"{message.from_user.first_name} {message.from_user.last_name or ''}"
-
-    # Добавляем пользователя в базу, если его нет
-    safe_execute(
-        "INSERT OR IGNORE INTO users (user_id, username, full_name) VALUES (?, ?, ?)",
-        (user_id, username, full_name),
-    )
-
-    # Проверяем, прошёл ли пользователь анкету
-    cursor.execute("SELECT survey_completed FROM users WHERE user_id = ?", (user_id,))
-    result = cursor.fetchone()
-
-    if result and result[0] == 1:
+    
+    cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+    user = cursor.fetchone()
+    
+    if user:
         bot.reply_to(message, "Вы уже проходили анкету. Спасибо!")
     else:
+        cursor.execute("INSERT OR IGNORE INTO users (user_id, username, full_name) VALUES (?, ?, ?)", (user_id, username, full_name))
+        conn.commit()
         send_intro(message)
 
 # Отправка вступительного сообщения
 def send_intro(message):
-    bot.send_message(message.chat.id, "Добрый день, меня зовут Давид👋 ...\nВы хотите, чтобы мы стали лучше для вас?", reply_markup=generate_yes_no_keyboard())
+    bot.send_message(message.chat.id, "Добрый день, меня зовут Давид👋 я владелец сети магазинов 'Дым'💨\nРад знакомству😊\n\nЯ создал этого бота, чтобы дать своим гостям самый лучший сервис и предложение😍\n\nВы хотите, чтобы мы стали лучше для вас?", reply_markup=generate_yes_no_keyboard())
     bot.register_next_step_handler(message, ask_survey_consent)
 
+# Генерация клавиатуры Да/Нет
 def generate_yes_no_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("Да", "Нет")
     return markup
 
-# Анкетирование
+# Спрашиваем, готов ли пользователь помочь
 def ask_survey_consent(message):
-    bot.send_message(message.chat.id, "Отлично!...\nСможете нам помочь, ответив на 3 вопроса?", reply_markup=generate_yes_no_keyboard())
+    bot.send_message(message.chat.id, "Отлично✨\nТут я буду публиковать интересные предложения, розыгрыши и подарки 🎁\n\nНо самое главное, мы хотим улучшить качество нашей работы.\n\nСможете нам помочь, ответив на 3 вопроса?", reply_markup=generate_yes_no_keyboard())
     bot.register_next_step_handler(message, ask_likes)
 
+# Вопрос о том, что ценят больше всего
 def ask_likes(message):
-    bot.send_message(message.chat.id, "Какие 2 вещи в наших магазинах вы цените больше всего?")
+    bot.send_message(message.chat.id, "Благодарим за помощь🤝\nПодскажите, какие 2 вещи в наших магазинах вы цените больше всего?😍")
     bot.register_next_step_handler(message, save_likes)
 
+# Сохранение ответа о ценностях
 def save_likes(message):
-    safe_execute("UPDATE users SET likes = ? WHERE user_id = ?", (message.text, message.from_user.id))
+    cursor.execute("UPDATE users SET likes = ? WHERE user_id = ?", (message.text, message.from_user.id))
+    conn.commit()
     ask_dislikes(message)
 
+# Вопрос о том, что не нравится
 def ask_dislikes(message):
-    bot.send_message(message.chat.id, "Какие вещи вам не нравятся?")
+    bot.send_message(message.chat.id, "Хорошо😊\nИ еще пару вещей, которые вам больше всего не нравятся?👿")
     bot.register_next_step_handler(message, save_dislikes)
 
+# Сохранение ответа о недостатках
 def save_dislikes(message):
-    safe_execute("UPDATE users SET dislikes = ? WHERE user_id = ?", (message.text, message.from_user.id))
+    cursor.execute("UPDATE users SET dislikes = ? WHERE user_id = ?", (message.text, message.from_user.id))
+    conn.commit()
     ask_suggestions(message)
 
+# Вопрос о предложениях по улучшению
 def ask_suggestions(message):
-    bot.send_message(message.chat.id, "Что бы вы изменили, будучи на моем месте?")
+    bot.send_message(message.chat.id, "Отлично и последний вопрос)\nЧто бы вы изменили, будучи на моем месте, чтобы стать лучше?")
     bot.register_next_step_handler(message, save_suggestions)
 
+# Сохранение предложений
 def save_suggestions(message):
-    safe_execute("UPDATE users SET suggestions = ?, survey_completed = 1 WHERE user_id = ?", (message.text, message.from_user.id))
-    bot.send_message(message.chat.id, "Спасибо за анкету! Теперь вы можете писать нам сообщения.")
+    cursor.execute("UPDATE users SET suggestions = ? WHERE user_id = ?", (message.text, message.from_user.id))
+    conn.commit()
+    ask_additional_info(message)
 
-# Команда очистки базы
+# Дополнительные вопросы (пол, возраст, частота посещений)
+def ask_additional_info(message):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("Мужской", "Женский")
+    bot.send_message(message.chat.id, "Спасибо огромное за помощь😊\nЯ учту ваши пожелания и постараюсь приложить усилия, чтобы это исправить.\nЕсли не сложно, подскажите ваш пол:", reply_markup=markup)
+    bot.register_next_step_handler(message, save_gender)
+
+def save_gender(message):
+    cursor.execute("UPDATE users SET gender = ? WHERE user_id = ?", (message.text, message.from_user.id))
+    conn.commit()
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("До 22", "22-30", "Более 30")
+    bot.send_message(message.chat.id, "Укажите ваш возраст:", reply_markup=markup)
+    bot.register_next_step_handler(message, save_age_group)
+
+def save_age_group(message):
+    cursor.execute("UPDATE users SET age_group = ? WHERE user_id = ?", (message.text, message.from_user.id))
+    conn.commit()
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add("Был до 3х раз", "3-8", "Более 8 раз")
+    bot.send_message(message.chat.id, "Как часто вы нас посещали?", reply_markup=markup)
+    bot.register_next_step_handler(message, save_visit_frequency)
+
+def save_visit_frequency(message):
+    cursor.execute("UPDATE users SET visit_frequency = ? WHERE user_id = ?", (message.text, message.from_user.id))
+    conn.commit()
+    
+    # Отправляем анкету админу
+    send_survey_to_admin(message.from_user.id)
+
+    bot.send_message(message.chat.id, "Благодарю!\n📞 8-918-5567-53-33\nВот мой номер телефона, по нему вы всегда можете позвонить или написать в WhatsApp/Telegram.\n\nЕсли вам нужна информация о наличии, ценах или вкусах, напишите в наш чат: https://t.me/+BR14rdoGA91mZjdi")
+
+# Отправка анкеты админу
+def send_survey_to_admin(user_id):
+    cursor.execute("SELECT full_name, likes, dislikes, suggestions, gender, age_group, visit_frequency FROM users WHERE user_id = ?", (user_id,))
+    user_data = cursor.fetchone()
+    
+    if user_data:
+        full_name, likes, dislikes, suggestions, gender, age_group, visit_frequency = user_data
+        survey_text = f"Новая анкета клиента:\n\n"
+        survey_text += f"Имя: {full_name}\n"
+        survey_text += f"Ценит: {likes}\n"
+        survey_text += f"Не нравится: {dislikes}\n"
+        survey_text += f"Предложения: {suggestions}\n"
+        survey_text += f"Пол: {gender}\n"
+        survey_text += f"Возраст: {age_group}\n"
+        survey_text += f"Частота посещений: {visit_frequency}\n"
+        
+        bot.send_message(ADMIN_ID, survey_text)
+
+# Команда для очистки базы
 @bot.message_handler(commands=['clear_database'])
 def clear_database(message):
-    if message.from_user.id in ADMIN_IDS:
-        safe_execute("DELETE FROM users")
-        bot.reply_to(message, "База данных успешно очищена.")
-    else:
-        bot.reply_to(message, "У вас нет прав на выполнение этой команды.")
+    cursor.execute("DELETE FROM users")
+    conn.commit()
+    bot.reply_to(message, "База данных успешно очищена.")
 
-# Команда просмотра базы
+# Команда для просмотра базы
 @bot.message_handler(commands=['count_clients'])
 def count_clients(message):
     cursor.execute("SELECT COUNT(*) FROM users")
@@ -226,20 +162,21 @@ def count_clients(message):
 # Команда для рассылки
 @bot.message_handler(commands=['broadcast'])
 def broadcast(message):
-    if message.from_user.id not in ADMIN_IDS:
-        bot.reply_to(message, "У вас нет прав.")
+    if str(message.from_user.id) != ADMIN_ID:
+        bot.reply_to(message, "У вас нет прав для выполнения этой команды.")
         return
     bot.reply_to(message, "Введите текст для рассылки:")
     bot.register_next_step_handler(message, perform_broadcast)
 
 def perform_broadcast(message):
     cursor.execute("SELECT user_id FROM users")
-    for user_id, in cursor.fetchall():
+    user_ids = cursor.fetchall()
+    for user_id in user_ids:
         try:
-            bot.send_message(user_id, message.text)
+            bot.send_message(user_id[0], message.text)
         except:
             pass
     bot.reply_to(message, "Рассылка завершена.")
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
+# Запуск бота
+bot.polling(non_stop=True)

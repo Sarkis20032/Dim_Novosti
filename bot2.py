@@ -178,5 +178,8 @@ def perform_broadcast(message):
             pass
     bot.reply_to(message, "Рассылка завершена.")
 
+# Отключение Webhook перед запуском polling
+bot.remove_webhook()
+
 # Запуск бота
 bot.polling(non_stop=True)
